@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from influxdb_client import InfluxDBClient
 from alerts import format_short_telegram_alert, send_telegram_message
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 load_dotenv()
 
@@ -24,7 +25,6 @@ POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
 
-# Maximum allowed age for each instrument before the snapshot is considered stale
 MAX_AGE_MINUTES = {
     "ES": 15,
     "NQ": 15,
@@ -32,10 +32,12 @@ MAX_AGE_MINUTES = {
     "YM": 15,
     "VIX": 20,
     "DXY": 20,
-    "TNX": 90,   # yields can lag more depending on source/market hours
+    "TNX": 90,
     "GC": 20,
     "CL": 20,
 }
+
+EASTERN = ZoneInfo("America/New_York")
 
 
 def get_pg_connection():
@@ -124,6 +126,29 @@ def query_latest_snapshot():
 
 def snapshot_to_prices(snapshot):
     return {instrument: payload["price"] for instrument, payload in snapshot.items()}
+
+
+def is_market_closed_now():
+    """
+    Basic CME-style guard for your use case:
+    - Closed most of Saturday
+    - Reopens Sunday evening ET
+    - For simplicity, treat Sunday before 6:00 PM ET as closed
+    """
+    now_et = datetime.now(EASTERN)
+    weekday = now_et.weekday()  # Monday=0 ... Sunday=6
+    hour = now_et.hour
+    minute = now_et.minute
+
+    # Saturday
+    if weekday == 5:
+        return True
+
+    # Sunday before 6 PM ET
+    if weekday == 6 and (hour < 18):
+        return True
+
+    return False
 
 
 def get_stale_instruments(snapshot):
@@ -510,12 +535,27 @@ def main():
     setup_table()
 
     snapshot = query_latest_snapshot()
-    prices = snapshot_to_prices(snapshot)
+    if not snapshot:
+        print("No snapshot data found in InfluxDB.")
+        return
 
+    prices = snapshot_to_prices(snapshot)
     print("Latest prices:", prices)
 
     stale = get_stale_instruments(snapshot)
+    market_closed = is_market_closed_now()
+
     if stale:
+        if market_closed:
+            print("Market appears closed right now. Latest snapshot is stale, so analysis is skipped.")
+            for item in stale:
+                print(
+                    f" - {item['instrument']}: "
+                    f"age={item['age_minutes']} min, "
+                    f"allowed={item['allowed_minutes']} min"
+                )
+            return
+
         print("Stale instruments detected:")
         for item in stale:
             print(
