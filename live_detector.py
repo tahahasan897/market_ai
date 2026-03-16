@@ -160,7 +160,7 @@ def get_stale_instruments(snapshot):
         max_age = MAX_AGE_MINUTES.get(instrument, 30)
         age_minutes = (now - ts).total_seconds() / 60.0
 
-        if age_minutes > max_age:
+        if age_minutes > (max_age + 5):
             stale.append({
                 "instrument": instrument,
                 "age_minutes": round(age_minutes, 1),
