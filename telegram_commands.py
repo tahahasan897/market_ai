@@ -250,15 +250,17 @@ def handle_summary(chat_id: str):
 
 # ─── /suggestion ──────────────────────────────────────────────────────────────
 
-SUGGESTION_PROMPT = """You are a cross-asset market strategist for a swing trader.
+SUGGESTION_PROMPT = """You are a cross-asset market strategist advising a swing trader who holds positions for days to weeks.
 
 Given the current market snapshot and detected regime, produce a concise trade suggestion note.
 
 Rules:
-- Do NOT issue buy or sell orders
-- Provide directional bias only
-- Use only the data provided — do not invent prices
-- Keep it concise (under 500 words)
+- Do NOT issue direct buy or sell orders — these are analytical suggestions only
+- The trader does NOT use hard stop-loss orders on the exchange (due to stop hunting concerns)
+- Instead, provide soft stop levels as "risk alert" prices where the trader should reassess
+- Use only the data provided — do not invent prices or levels not derivable from the snapshot
+- Base entry and stop levels on the current prices shown — use round numbers or nearby support/resistance
+- Keep it concise (under 600 words)
 
 Format your response exactly like this:
 
@@ -275,7 +277,17 @@ WHAT WOULD INVALIDATE THIS THESIS:
 - [condition 2]
 
 SWING TRADE CONSIDERATIONS:
-- [1-2 ideas with reasoning, NOT orders]
+For each idea (1-2 max), include:
+- Asset and directional bias (long/short)
+- Suggested entry zone or limit price
+- Soft stop (risk alert level — where to reassess, NOT a hard exchange stop)
+- Reasoning tied to the current regime and cross-asset context
+
+Example format for each idea:
+  IDEA: ES long bias
+  ENTRY: limit near [price] or on pullback to [zone]
+  SOFT STOP: reassess below [price] (reason)
+  RATIONALE: [why this aligns with regime]
 
 Market snapshot:
 ES: {es}
@@ -318,7 +330,7 @@ def handle_suggestion(chat_id: str):
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=90.0)
         message = client.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=800,
+            max_tokens=1200,
             messages=[{"role": "user", "content": prompt}],
         )
         parts = []
@@ -339,7 +351,7 @@ def handle_suggestion(chat_id: str):
         "",
         esc(suggestion_text[:2500]),
         "",
-        "<i>⚠️ Analysis only — not a trade order.</i>",
+        "<i>⚠️ Analysis only — not a trade order. Stop levels are soft risk alerts, not exchange orders.</i>",
     ]
 
     send_telegram_message(chat_id, "\n".join(lines))
